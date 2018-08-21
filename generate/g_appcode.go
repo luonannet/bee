@@ -261,7 +261,7 @@ func (tag *OrmTag) String() string {
 	if tag.Comment != "" {
 		return fmt.Sprintf("`orm:\"%s\" description:\"%s\" json:\"%s\"`", ormoptionStr, tag.Column, tag.Comment)
 	}
-	return fmt.Sprintf("`orm:\"%s\" json:\"%s\"`", ormoptionStr, tag.Column)
+	return fmt.Sprintf("`orm:\"%s\"     json:\"%s\"`", ormoptionStr, tag.Column)
 }
 
 func GenerateAppcode(driver, connStr, level, tables, currpath string) {
@@ -990,7 +990,6 @@ const (
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	{{timePkg}}
 	"github.com/astaxie/beego/orm"
@@ -1028,7 +1027,7 @@ func Get{{modelName}}ById(id int) (v *{{modelName}}, err error) {
 // GetAll{{modelName}} retrieves all {{modelName}} matches certain condition. Returns empty list if
 // no records exist
 func GetAll{{modelName}}(query map[string]string, fields []string, sortby []string, order []string,
-	offset int64, limit int64) (ml []interface{}, err error) {
+	offset int64, limit int64) (ml []{{modelName}}, err error) {
 	o := orm.NewOrm()
 	qs := o.QueryTable(new({{modelName}}))
 	// query k=v
@@ -1080,24 +1079,24 @@ func GetAll{{modelName}}(query map[string]string, fields []string, sortby []stri
 		}
 	}
 
-	var l []{{modelName}}
+	// var l []{{modelName}}
 	qs = qs.OrderBy(sortFields...)
-	if _, err = qs.Limit(limit, offset).All(&l, fields...); err == nil {
-		if len(fields) == 0 {
-			for _, v := range l {
-				ml = append(ml, v)
-			}
-		} else {
-			// trim unused fields
-			for _, v := range l {
-				m := make(map[string]interface{})
-				val := reflect.ValueOf(v)
-				for _, fname := range fields {
-					m[fname] = val.FieldByName(fname).Interface()
-				}
-				ml = append(ml, m)
-			}
-		}
+	if _, err = qs.Limit(limit, offset).All(&ml, fields...); err == nil {
+		// if len(fields) == 0 {
+		// 	for _, v := range l {
+		// 		ml = append(ml, v)
+		// 	}
+		// } else {
+		// 	// trim unused fields
+		// 	for _, v := range l {
+		// 		m := make(map[string]interface{})
+		// 		val := reflect.ValueOf(v)
+		// 		for _, fname := range fields {
+		// 			m[fname] = val.FieldByName(fname).Interface()
+		// 		}
+		// 		ml = append(ml, m)
+		// 	}
+		// }
 		return ml, nil
 	}
 	return nil, err
@@ -1306,7 +1305,7 @@ func (c *{{ctrlName}}Controller) Delete() {
 }
 `
 	RouterTPL = `// @APIVersion 1.0.0
-// @Title beego Test API
+// @Title beego  API
 // @Description beego has a very cool tools to autogenerate documents for your API
 // @Contact astaxie@gmail.com
 // @TermsOfServiceUrl http://beego.me/
