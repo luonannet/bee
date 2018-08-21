@@ -257,10 +257,11 @@ func (tag *OrmTag) String() string {
 	if len(ormOptions) == 0 {
 		return ""
 	}
+	ormoptionStr := strings.Join(ormOptions, ";")
 	if tag.Comment != "" {
-		return fmt.Sprintf("`orm:\"%s\" description:\"%s\"`", strings.Join(ormOptions, ";"), tag.Comment)
+		return fmt.Sprintf("`orm:\"%s\" description:\"%s\" json:\"%s\"`", ormoptionStr, tag.Column, tag.Comment)
 	}
-	return fmt.Sprintf("`orm:\"%s\"`", strings.Join(ormOptions, ";"))
+	return fmt.Sprintf("`orm:\"%s\" json:\"%s\"`", ormoptionStr, tag.Column)
 }
 
 func GenerateAppcode(driver, connStr, level, tables, currpath string) {
