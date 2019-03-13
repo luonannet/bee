@@ -102,6 +102,7 @@ var typeMappingMysql = map[string]string{
 	"binary":             "string", // binary
 	"varbinary":          "string",
 	"year":               "int16",
+	"json":               "string", // json
 }
 
 // typeMappingPostgres maps SQL data type to corresponding Go data type
@@ -257,11 +258,10 @@ func (tag *OrmTag) String() string {
 	if len(ormOptions) == 0 {
 		return ""
 	}
-	ormoptionStr := strings.Join(ormOptions, ";")
 	if tag.Comment != "" {
-		return fmt.Sprintf("`orm:\"%s\" description:\"%s\" json:\"%s\"`", ormoptionStr, tag.Column, tag.Comment)
+		return fmt.Sprintf("`orm:\"%s\" description:\"%s\"`", strings.Join(ormOptions, ";"), tag.Comment)
 	}
-	return fmt.Sprintf("`orm:\"%s\"     json:\"%s\"`", ormoptionStr, tag.Column)
+	return fmt.Sprintf("`orm:\"%s\"`", strings.Join(ormOptions, ";"))
 }
 
 func GenerateAppcode(driver, connStr, level, tables, currpath string) {
@@ -319,7 +319,7 @@ func gen(dbms, connStr string, mode byte, selectedTableNames map[string]bool, ap
 		mvcPath.RouterPath = path.Join(apppath, "routers")
 		createPaths(mode, mvcPath)
 		pkgPath := getPackagePath(apppath)
-		writeSourceFiles(pkgPath, tables, mode, mvcPath)
+		writeSourceFiles(pkgPath, tables, mode, mvcPath, selectedTableNames)
 	} else {
 		beeLogger.Log.Fatalf("Generating app code from '%s' database is not supported yet.", dbms)
 	}
@@ -729,26 +729,32 @@ func createPaths(mode byte, paths *MvcPath) {
 // writeSourceFiles generates source files for model/controller/router
 // It will wipe the following directories and recreate them:./models, ./controllers, ./routers
 // Newly geneated files will be inside these folders.
-func writeSourceFiles(pkgPath string, tables []*Table, mode byte, paths *MvcPath) {
+func writeSourceFiles(pkgPath string, tables []*Table, mode byte, paths *MvcPath, selectedTables map[string]bool) {
 	if (OModel & mode) == OModel {
 		beeLogger.Log.Info("Creating model files...")
-		writeModelFiles(tables, paths.ModelPath)
+		writeModelFiles(tables, paths.ModelPath, selectedTables, pkgPath)
 	}
 	if (OController & mode) == OController {
 		beeLogger.Log.Info("Creating controller files...")
-		writeControllerFiles(tables, paths.ControllerPath, pkgPath)
+		writeControllerFiles(tables, paths.ControllerPath, selectedTables, pkgPath)
 	}
 	if (ORouter & mode) == ORouter {
 		beeLogger.Log.Info("Creating router files...")
-		writeRouterFile(tables, paths.RouterPath, pkgPath)
+		writeRouterFile(tables, paths.RouterPath, selectedTables, pkgPath)
 	}
 }
 
 // writeModelFiles generates model files
-func writeModelFiles(tables []*Table, mPath string) {
+func writeModelFiles(tables []*Table, mPath string, selectedTables map[string]bool, pkgPath string) {
 	w := colors.NewColorWriter(os.Stdout)
 
 	for _, tb := range tables {
+		// if selectedTables map is not nil and this table is not selected, ignore it
+		if selectedTables != nil {
+			if _, selected := selectedTables[tb.Name]; !selected {
+				continue
+			}
+		}
 		filename := getFileName(tb.Name)
 		fpath := path.Join(mPath, filename+".go")
 		var f *os.File
@@ -791,6 +797,7 @@ func writeModelFiles(tables []*Table, mPath string) {
 		}
 		fileStr = strings.Replace(fileStr, "{{timePkg}}", timePkg, -1)
 		fileStr = strings.Replace(fileStr, "{{importTimePkg}}", importTimePkg, -1)
+		fileStr = strings.Replace(fileStr, "{{pkgPath}}", pkgPath, -1)
 		if _, err := f.WriteString(fileStr); err != nil {
 			beeLogger.Log.Fatalf("Could not write model file to '%s': %s", fpath, err)
 		}
@@ -801,10 +808,16 @@ func writeModelFiles(tables []*Table, mPath string) {
 }
 
 // writeControllerFiles generates controller files
-func writeControllerFiles(tables []*Table, cPath string, pkgPath string) {
+func writeControllerFiles(tables []*Table, cPath string, selectedTables map[string]bool, pkgPath string) {
 	w := colors.NewColorWriter(os.Stdout)
 
 	for _, tb := range tables {
+		// If selectedTables map is not nil and this table is not selected, ignore it
+		if selectedTables != nil {
+			if _, selected := selectedTables[tb.Name]; !selected {
+				continue
+			}
+		}
 		if tb.Pk == "" {
 			continue
 		}
@@ -843,11 +856,17 @@ func writeControllerFiles(tables []*Table, cPath string, pkgPath string) {
 }
 
 // writeRouterFile generates router file
-func writeRouterFile(tables []*Table, rPath string, pkgPath string) {
+func writeRouterFile(tables []*Table, rPath string, selectedTables map[string]bool, pkgPath string) {
 	w := colors.NewColorWriter(os.Stdout)
 
 	var nameSpaces []string
 	for _, tb := range tables {
+		// If selectedTables map is not nil and this table is not selected, ignore it
+		if selectedTables != nil {
+			if _, selected := selectedTables[tb.Name]; !selected {
+				continue
+			}
+		}
 		if tb.Pk == "" {
 			continue
 		}
@@ -990,7 +1009,8 @@ const (
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"{{pkgPath}}/util"
+	"strings" 
 	{{timePkg}}
 	"github.com/astaxie/beego/orm"
 )
@@ -1010,6 +1030,8 @@ func init() {
 func Add{{modelName}}(m *{{modelName}}) (id int64, err error) {
 	o := orm.NewOrm()
 	id, err = o.Insert(m)
+	key := fmt.Sprintf("%s_%d", m.TableName(), id)
+	util.Set(key, m)
 	return
 }
 
@@ -1027,7 +1049,7 @@ func Get{{modelName}}ById(id int) (v *{{modelName}}, err error) {
 // GetAll{{modelName}} retrieves all {{modelName}} matches certain condition. Returns empty list if
 // no records exist
 func GetAll{{modelName}}(query map[string]string, fields []string, sortby []string, order []string,
-	offset int64, limit int64) (ml []{{modelName}}, err error) {
+	offset int64, limit int64) (ml []*{{modelName}}, err error) {
 	o := orm.NewOrm()
 	qs := o.QueryTable(new({{modelName}}))
 	// query k=v
@@ -1079,25 +1101,10 @@ func GetAll{{modelName}}(query map[string]string, fields []string, sortby []stri
 		}
 	}
 
-	// var l []{{modelName}}
+	var l []*{{modelName}}
 	qs = qs.OrderBy(sortFields...)
-	if _, err = qs.Limit(limit, offset).All(&ml, fields...); err == nil {
-		// if len(fields) == 0 {
-		// 	for _, v := range l {
-		// 		ml = append(ml, v)
-		// 	}
-		// } else {
-		// 	// trim unused fields
-		// 	for _, v := range l {
-		// 		m := make(map[string]interface{})
-		// 		val := reflect.ValueOf(v)
-		// 		for _, fname := range fields {
-		// 			m[fname] = val.FieldByName(fname).Interface()
-		// 		}
-		// 		ml = append(ml, m)
-		// 	}
-		// }
-		return ml, nil
+	if _, err = qs.Limit(limit, offset).All(&l, fields...); err == nil { 
+		return l, nil
 	}
 	return nil, err
 }
@@ -1111,6 +1118,8 @@ func Update{{modelName}}ById(m *{{modelName}}) (err error) {
 	if err = o.Read(&v); err == nil {
 		var num int64
 		if num, err = o.Update(m); err == nil {
+			key := fmt.Sprintf("%s_%d", m.TableName(), m.Id)
+			util.Set(key, m)
 			fmt.Println("Number of records updated in database:", num)
 		}
 	}
@@ -1129,6 +1138,8 @@ func Delete{{modelName}}(id int) (err error) {
 			fmt.Println("Number of records deleted in database:", num)
 		}
 	}
+	key := fmt.Sprintf("%s_%d", v.TableName(), v.Id)
+	util.DelKey(key)
 	return
 }
 `
@@ -1305,7 +1316,7 @@ func (c *{{ctrlName}}Controller) Delete() {
 }
 `
 	RouterTPL = `// @APIVersion 1.0.0
-// @Title beego  API
+// @Title beego Test API
 // @Description beego has a very cool tools to autogenerate documents for your API
 // @Contact astaxie@gmail.com
 // @TermsOfServiceUrl http://beego.me/
